@@ -1,122 +1,119 @@
 ---
 name: session-wrap
 description: This skill should be used when the user asks to "wrap up session", "end session", "session wrap", "/wrap", "document learnings", "what should I commit", or wants to analyze completed work before ending a coding session.
-version: 2.0.0
+version: 3.0.0
 ---
 
 # Session Wrap Skill
 
-Comprehensive session wrap-up workflow with multi-agent analysis.
+Session wrap-up workflow: feed agents the REAL conversation (not a 3-line summary), run a slim two-agent analysis pinned to a specific repo revision, validate proposals only when there are proposals, and save a handoff-grade session summary.
 
 ## Execution Flow
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  1. Check Git Status                                │
+│  1. Collect Context (git status + transcript        │
+│     extract + repo@HEAD pin via collect-context.sh) │
 ├─────────────────────────────────────────────────────┤
-│  2. Phase 1: 4 Analysis Agents (Parallel)           │
+│  2. Phase 1: 2 Analysis Agents (Parallel)           │
 │     ┌─────────────────┬─────────────────┐           │
-│     │  doc-updater    │  automation-    │           │
-│     │  (docs update)  │  scout          │           │
-│     ├─────────────────┼─────────────────┤           │
-│     │  learning-      │  followup-      │           │
-│     │  extractor      │  suggester      │           │
+│     │ knowledge-      │ continuity-     │           │
+│     │ curator         │ auditor         │           │
+│     │ (learnings +    │ (TODOs, verify  │           │
+│     │  placement)     │  cmds, autom.)  │           │
 │     └─────────────────┴─────────────────┘           │
 ├─────────────────────────────────────────────────────┤
-│  3. Phase 2: Validation Agent (Sequential)          │
-│     ┌───────────────────────────────────┐           │
-│     │       duplicate-checker           │           │
-│     │  (Validate Phase 1 proposals)     │           │
-│     └───────────────────────────────────┘           │
+│  3. Phase 2: duplicate-checker (CONDITIONAL —       │
+│     only if Phase 1 proposed additions)             │
 ├─────────────────────────────────────────────────────┤
 │  4. Integrate Results & AskUserQuestion             │
 ├─────────────────────────────────────────────────────┤
 │  5. Execute Selected Actions                        │
 │     • Save session summary → .claude-sessions/      │
-│     • Create commit                                 │
-│     • Update CLAUDE.md                              │
-│     • Create automation                             │
+│     • Create commit / Update docs / Automation      │
 └─────────────────────────────────────────────────────┘
 ```
 
-## Step 1: Check Git Status
+## Step 1: Collect Context
 
 ```bash
 git status --short
-git diff --stat HEAD~3 2>/dev/null || git diff --stat
+git log --oneline -10
 ```
+
+Then run the context collector. **Type a literal random token yourself** (e.g. `wrap-k3v9x2` — actual random characters you generate; never `$(...)` substitution, because the transcript must contain the literal token for self-identification):
+
+```bash
+bash ${baseDir}/scripts/collect-context.sh wrap-XXXXXX
+```
+
+It prints `KEY=VALUE` lines:
+
+- `CONTEXT_FILE` — compact extract of the current conversation (user + assistant text only, thinking/tool noise stripped)
+- `MATCHED` — `nonce` (certain: this session) or `newest-fallback` (uncertain: could be a concurrent sibling session; if so, warn in the final report)
+- `REPO`, `HEAD`, `DIRTY` — the revision pin agents must verify claims against
+
+Compose a Session Summary yourself (work done, files touched, key decisions). Agents receive BOTH your summary and the context file — your summary orients, the context file is the evidence source.
 
 ## Step 2: Phase 1 - Analysis Agents (Parallel)
 
-Execute 4 agents in parallel (single message with 4 Task calls).
-
-### Session Summary (Provide to all agents)
+Execute 2 agents in parallel (single message with 2 Task calls). Include this common block VERBATIM at the top of both prompts:
 
 ```
 Session Summary:
-- Work: [Main tasks performed in session]
-- Files: [Created/modified files]
-- Decisions: [Key decisions made]
+- Work: [main tasks performed]
+- Files: [created/modified files]
+- Decisions: [key decisions made]
+
+Context file: [CONTEXT_FILE path] — Read it; it is the actual conversation.
+Repo: [REPO] @ [HEAD] (dirty files: [DIRTY])
+
+Ground rules (unconditional):
+- Verify any claim about current file/repo state by reading files under the
+  repo path above. If the checkout you read is NOT at the HEAD above, report
+  the mismatch instead of raising findings from it.
+- Every finding carries evidence: file:line, a command you ran with its
+  output, or a quote from the context file. Label OBSERVED vs INFERRED.
+- Your report is raw input; the main session verifies before acting.
 ```
 
-### Parallel Execution
-
 ```
 Task(
-    subagent_type="doc-updater",
-    description="Document update analysis",
-    prompt="[Session Summary]\n\nAnalyze if CLAUDE.md, context.md need updates."
+    subagent_type="knowledge-curator",
+    description="Learnings + placement analysis",
+    prompt="[Common block]\n\nExtract session learnings and route each to its correct documentation home, with duplicate-check evidence per proposal."
 )
 
 Task(
-    subagent_type="automation-scout",
-    description="Automation pattern analysis",
-    prompt="[Session Summary]\n\nAnalyze repetitive patterns or automation opportunities."
-)
-
-Task(
-    subagent_type="learning-extractor",
-    description="Learning points extraction",
-    prompt="[Session Summary]\n\nExtract learnings, mistakes, and new discoveries."
-)
-
-Task(
-    subagent_type="followup-suggester",
-    description="Follow-up task suggestions",
-    prompt="[Session Summary]\n\nSuggest incomplete tasks and next session priorities."
+    subagent_type="continuity-auditor",
+    description="Continuity + automation audit",
+    prompt="[Common block]\n\nIdentify incomplete work (verified, with per-TODO verification commands), automation opportunities, priorities, and an anti-task list."
 )
 ```
-
-### Agent Roles
 
 | Agent | Role | Output |
 |-------|------|--------|
-| **doc-updater** | Analyze CLAUDE.md/context.md updates | Specific content to add |
-| **automation-scout** | Detect automation patterns | skill/command/agent suggestions |
-| **learning-extractor** | Extract learning points | TIL format summary |
-| **followup-suggester** | Suggest follow-up tasks | Prioritized task list |
+| **knowledge-curator** | Learnings, mistakes, placement routing (memory/CLAUDE.md/project docs) | Placement proposals with dedup evidence |
+| **continuity-auditor** | Incomplete work, follow-up priorities, automation patterns, refuted approaches | Verified TODO list + anti-task list |
 
-## Step 3: Phase 2 - Validation Agent (Sequential)
+## Step 3: Phase 2 - Validation (Conditional)
 
-Run after Phase 1 completes (dependency on Phase 1 results).
+Run `duplicate-checker` ONLY if Phase 1 produced addition proposals (docs, memory, automation). If both agents reported "no additions", skip and note "Phase 2 skipped: no addition proposals".
 
 ```
 Task(
     subagent_type="duplicate-checker",
     description="Phase 1 proposal validation",
     prompt="""
-Validate Phase 1 analysis results.
+Validate these Phase 1 proposals for duplicates.
 
-## doc-updater proposals:
-[doc-updater results]
+## knowledge-curator proposals:
+[results]
 
-## automation-scout proposals:
-[automation-scout results]
+## continuity-auditor automation proposals:
+[results]
 
-Check if proposals duplicate existing docs/automation:
-1. Complete duplicate: Recommend skip
-2. Partial duplicate: Suggest merge approach
-3. No duplicate: Approve for addition
+Classify each: Approved / Merge (with target) / Skip (with existing location).
 """
 )
 ```
@@ -126,20 +123,17 @@ Check if proposals duplicate existing docs/automation:
 ```markdown
 ## Wrap Analysis Results
 
-### Documentation Updates
-[doc-updater summary]
-- Duplicate check: [duplicate-checker feedback]
-
-### Automation Suggestions
-[automation-scout summary]
-- Duplicate check: [duplicate-checker feedback]
-
-### Learning Points
-[learning-extractor summary]
+### Knowledge & Placement
+[knowledge-curator summary + duplicate-checker verdicts]
 
 ### Follow-up Tasks
-[followup-suggester summary]
+[continuity-auditor summary]
+
+### Automation Suggestions
+[continuity-auditor automation section + duplicate-checker verdicts]
 ```
+
+Where an agent's claim conflicts with what you observed in the session yourself, your observation wins — agents saw an extract; verify their flagged lines before presenting them as facts.
 
 ## Step 5: Action Selection
 
@@ -152,13 +146,15 @@ AskUserQuestion(
         "options": [
             {"label": "Save session summary (Recommended)", "description": "Save to .claude-sessions/ for next session context"},
             {"label": "Create commit", "description": "Commit changes"},
-            {"label": "Update CLAUDE.md", "description": "Document new knowledge/workflows"},
+            {"label": "Update docs/memory", "description": "Apply approved placement proposals"},
             {"label": "Create automation", "description": "Generate skill/command/agent"},
             {"label": "Skip", "description": "End without action"}
         ]
     }]
 )
 ```
+
+If the user's global configuration declares machine-local wrap options (e.g. a "Session Wrap Settings" section with an extra backup destination), offer those options too — that section, not this skill, owns machine-specific paths and gates.
 
 ## Step 6: Execute Selected Actions
 
@@ -199,9 +195,20 @@ If "Save session summary" selected:
 
    **Why:** multi-session parallel work makes carryover TODO lists go stale
    fast. Trusting them without `git log --grep` cross-check taxes ~10min per
-   stale item. See project memory `learning_stale-session-todos.md` for details.
+   stale item.
 
-4. **Write session file** with this template:
+4. **Handoff contract** (unconditional — applies to every session file):
+
+   - Every TODO carries the command that answers whether it is still open,
+     so the next session verifies in one paste instead of re-deriving.
+   - Live measurements are NOT handed off — write the re-measure command
+     instead. Exception: retention-bound captures (in-memory logs, rotating
+     buffers) — there the timestamped capture IS the deliverable; keep it.
+   - If the session refuted approaches, include a `하지 말 것` (anti-task)
+     section: each refuted approach with the evidence that killed it and the
+     axis it was refuted on.
+
+5. **Write session file** with this template:
    ```markdown
    # [Session Title]
 
@@ -209,18 +216,23 @@ If "Save session summary" selected:
    [1-2 sentence summary of what was done]
 
    ## 주요 작업
-   - [Task 1]
-   - [Task 2]
+   - [Task 1, with evidence of verification]
 
    ## 미완료 작업 / TODO
-   - [ ] [Incomplete task 1]
-   - [ ] [Incomplete task 2]
+   - [ ] [P1. Task — one-line state] 확인: `command that answers if still open`
+
+   ## 하지 말 것
+   - [Refuted approach — refuting evidence and its axis] (omit section if none)
 
    ## 다음 세션 제안
-   [followup-suggester recommendations]
+   [continuity-auditor recommendations, filtered by your own judgment]
    ```
 
-5. **Confirm save location**:
+6. **Lint before save**: if the user's environment defines a prose linter for
+   human-read session documents (check their global config), run it on the
+   file and fix violations before reporting the save.
+
+7. **Confirm save location**:
    ```
    ✅ Session saved: .claude-sessions/YYYY-MM-DD-HH-mm-topic.md
    ```

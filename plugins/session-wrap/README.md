@@ -1,16 +1,15 @@
 # Session Wrap Plugin
 
-A Claude Code plugin for comprehensive session wrap-up with multi-agent analysis.
+A Claude Code plugin for session wrap-up with real-transcript-fed multi-agent analysis.
 
 ## Features
 
-- **Multi-Agent Analysis Pipeline**: 5 specialized agents analyze your session from different perspectives
-- **2-Phase Architecture**: Parallel analysis followed by sequential validation
-- **Documentation Updates**: Identify what should be added to CLAUDE.md and context.md
-- **Automation Discovery**: Find patterns worth automating as skills/commands/agents
-- **Learning Capture**: Extract insights, mistakes, and discoveries in TIL format
-- **Follow-up Planning**: Prioritized task list for next session
-- **Duplicate Prevention**: Validates proposals against existing content
+- **Real Session Context**: `collect-context.sh` extracts the actual conversation (93% size reduction) and feeds it to analysis agents — no more analysis from a 3-line summary
+- **Revision-Pinned Analysis**: agents receive `repo @ HEAD` and must verify claims against that checkout, reporting mismatches instead of raising stale-checkout false alarms
+- **Slim 2-Phase Architecture**: two parallel analysis agents, plus a validation agent that runs only when there are proposals to validate
+- **Verified TODO Handoffs**: every follow-up task is checked against git/file state before it is written, and carries the command that answers whether it is still open
+- **Learning Capture with Placement**: learnings routed to their correct home (auto-memory, CLAUDE.md, project docs) with duplicate-check evidence per proposal
+- **Anti-Task Lists**: approaches refuted during the session are recorded with their refuting evidence, so the next session does not retry them
 
 ## Installation
 
@@ -40,9 +39,9 @@ claude --plugin-dir /path/to/session-wrap
 ```
 
 Runs the full wrap-up workflow:
-1. Check git status
-2. Phase 1: Run 4 analysis agents in parallel
-3. Phase 2: Validate proposals for duplicates
+1. Collect context: git status + transcript extract + repo@HEAD pin
+2. Phase 1: 2 analysis agents in parallel
+3. Phase 2: validate proposals for duplicates (only if there are proposals)
 4. Present results and let you choose actions
 5. Execute selected actions
 
@@ -57,39 +56,40 @@ When arguments are provided, creates a commit with that message directly.
 ## Architecture
 
 ```
+collect-context.sh  →  conversation extract + repo@HEAD pin
+                            │
 Phase 1: Analysis (Parallel)
-┌──────────────┬──────────────┬──────────────┬──────────────┐
-│ doc-updater  │ automation-  │ learning-    │ followup-    │
-│              │ scout        │ extractor    │ suggester    │
-└──────┬───────┴──────┬───────┴──────┬───────┴──────┬───────┘
-       └──────────────┴──────────────┴──────────────┘
-                            │
-                            ▼
-Phase 2: Validation (Sequential)
-┌─────────────────────────────────────────────────────────────┐
-│                    duplicate-checker                         │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-                    User Selection
+┌─────────────────────┬─────────────────────┐
+│ knowledge-curator   │ continuity-auditor  │
+│ learnings +         │ verified TODOs +    │
+│ placement + dedup   │ automation + anti-  │
+│ evidence            │ task list           │
+└──────────┬──────────┴──────────┬──────────┘
+           └──────────┬──────────┘
+                      ▼
+Phase 2: Validation (CONDITIONAL — only if additions proposed)
+┌─────────────────────────────────────────────┐
+│              duplicate-checker              │
+└─────────────────────────────────────────────┘
+                      │
+                      ▼
+              User Selection
 ```
 
 ## Agents
 
 | Agent | Model | Purpose |
 |-------|-------|---------|
-| `doc-updater` | sonnet | Analyze documentation update needs |
-| `automation-scout` | sonnet | Detect automation opportunities |
-| `learning-extractor` | sonnet | Extract learnings and mistakes |
-| `followup-suggester` | sonnet | Suggest prioritized follow-up tasks |
-| `duplicate-checker` | haiku | Validate proposals for duplicates |
+| `knowledge-curator` | inherit | Extract learnings, route each to its documentation home, dedup with evidence |
+| `continuity-auditor` | inherit | Verify incomplete work, attach verification commands, automation scouting, anti-task list |
+| `duplicate-checker` | haiku | Independent second-pass duplicate validation (conditional) |
 
 ## Skills
 
 ### session-wrap
-Session wrap-up best practices, multi-agent orchestration patterns, 2-phase pipeline design guidance.
+Wrap-up workflow: context collection, 2-agent analysis, conditional validation, handoff-grade session summaries.
 
-**Trigger phrases:** "session wrap-up", "wrap best practices", "multi-agent orchestration", "2-phase pipeline"
+**Trigger phrases:** "session wrap-up", "wrap up session", "end session", "/wrap"
 
 ### history-insight
 Claude Code 세션 히스토리를 분석하고 인사이트를 추출합니다.
@@ -108,16 +108,16 @@ session-wrap/
 ├── .claude-plugin/
 │   └── plugin.json           # Plugin manifest
 ├── commands/
-│   └── wrap.md               # /wrap command
+│   └── wrap.md               # /wrap command (pointer to the skill)
 ├── agents/
-│   ├── doc-updater.md        # Documentation analysis
-│   ├── automation-scout.md   # Automation detection
-│   ├── learning-extractor.md # Learning capture
-│   ├── followup-suggester.md # Task prioritization
-│   └── duplicate-checker.md  # Validation
+│   ├── knowledge-curator.md  # Learnings + placement + dedup
+│   ├── continuity-auditor.md # Verified TODOs + automation + anti-tasks
+│   └── duplicate-checker.md  # Conditional validation
 ├── skills/
 │   ├── session-wrap/
-│   │   ├── SKILL.md          # Best practices guide
+│   │   ├── SKILL.md          # Workflow definition
+│   │   ├── scripts/
+│   │   │   └── collect-context.sh
 │   │   └── references/
 │   │       └── multi-agent-patterns.md
 │   ├── history-insight/
@@ -153,13 +153,17 @@ session-wrap/
 
 ## Integration with plugin-dev
 
-When `automation-scout` recommends creating a new skill/command/agent, use:
+When `continuity-auditor` recommends creating a new skill/command/agent, use:
 
 ```
 /plugin-dev:create-plugin
 ```
 
 This will guide you through creating a well-structured automation.
+
+## Migrating from 1.x
+
+The four Phase 1 agents (`doc-updater`, `automation-scout`, `learning-extractor`, `followup-suggester`) were consolidated into two (`knowledge-curator`, `continuity-auditor`). Motivation, measured on real usage: each agent spawn cost ~70k tokens of context inheritance before doing any work, a full wrap took ~30 minutes of wall clock, and the validation phase was skipped by operators in a third of runs — while analysis quality was limited by agents seeing only a summary, which the transcript feed fixes.
 
 ## References
 

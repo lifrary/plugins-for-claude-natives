@@ -1,7 +1,7 @@
 {
   "name": "session-wrap",
-  "version": "1.0.0",
-  "description": "Session wrap-up workflow with multi-agent analysis pipeline for documentation, automation, learning, and follow-up suggestions",
+  "version": "2.0.0",
+  "description": "Session wrap-up workflow: real-transcript-fed two-agent analysis with conditional duplicate validation, verified TODO handoffs, and session summary files",
   "author": {
     "name": "Team Attention",
     "url": "https://github.com/team-attention"
