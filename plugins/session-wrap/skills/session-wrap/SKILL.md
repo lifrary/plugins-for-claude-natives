@@ -32,6 +32,10 @@ Comprehensive session wrap-up workflow with multi-agent analysis.
 │  4. Integrate Results & AskUserQuestion             │
 ├─────────────────────────────────────────────────────┤
 │  5. Execute Selected Actions                        │
+│     • Save session summary → .claude-sessions/      │
+│     • Create commit                                 │
+│     • Update CLAUDE.md                              │
+│     • Create automation                             │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -146,7 +150,8 @@ AskUserQuestion(
         "header": "Wrap Options",
         "multiSelect": true,
         "options": [
-            {"label": "Create commit (Recommended)", "description": "Commit changes"},
+            {"label": "Save session summary (Recommended)", "description": "Save to .claude-sessions/ for next session context"},
+            {"label": "Create commit", "description": "Commit changes"},
             {"label": "Update CLAUDE.md", "description": "Document new knowledge/workflows"},
             {"label": "Create automation", "description": "Generate skill/command/agent"},
             {"label": "Skip", "description": "End without action"}
@@ -158,6 +163,67 @@ AskUserQuestion(
 ## Step 6: Execute Selected Actions
 
 Execute only the actions selected by user.
+
+### Save Session Summary
+
+If "Save session summary" selected:
+
+1. **Create directory** (if not exists):
+   ```bash
+   mkdir -p .claude-sessions
+   ```
+
+2. **Generate filename**: `YYYY-MM-DD-HH-mm-topic.md`
+   - Topic: 2-4 word summary in kebab-case (e.g., `auth-bug-fix`, `api-refactor`)
+
+3. **Verify TODOs before writing** (author-side stale-TODO prevention):
+
+   For each TODO that will appear in `미완료 작업 / TODO` — **especially items
+   inherited from prior-session carryover context** (loaded `.claude-sessions/*.md`
+   history, "P0 from last session", etc.) — verify the state before writing:
+
+   ```bash
+   # Per-TODO verification
+   git log --oneline --since="2 weeks ago" -- <relevant-path> | grep -i "<todo-keyword>"
+   ```
+
+   Plus a targeted file read of the referenced code/file. Classify each TODO:
+
+   - **STILL_OPEN**: no matching commit, current code still matches the described problem → keep
+   - **LIKELY_DONE**: matching commit + file state no longer matches → drop from the list
+   - **UNCLEAR**: partial match or ambiguous evidence → keep but flag with `(verify)` suffix
+
+   Write only STILL_OPEN and UNCLEAR entries into the session file. Do not
+   propagate LIKELY_DONE items — the next session will inherit them as stale
+   carryover and burn cycles re-verifying.
+
+   **Why:** multi-session parallel work makes carryover TODO lists go stale
+   fast. Trusting them without `git log --grep` cross-check taxes ~10min per
+   stale item. See project memory `learning_stale-session-todos.md` for details.
+
+4. **Write session file** with this template:
+   ```markdown
+   # [Session Title]
+
+   ## 요약
+   [1-2 sentence summary of what was done]
+
+   ## 주요 작업
+   - [Task 1]
+   - [Task 2]
+
+   ## 미완료 작업 / TODO
+   - [ ] [Incomplete task 1]
+   - [ ] [Incomplete task 2]
+
+   ## 다음 세션 제안
+   [followup-suggester recommendations]
+   ```
+
+5. **Confirm save location**:
+   ```
+   ✅ Session saved: .claude-sessions/YYYY-MM-DD-HH-mm-topic.md
+   ```
 
 ---
 
