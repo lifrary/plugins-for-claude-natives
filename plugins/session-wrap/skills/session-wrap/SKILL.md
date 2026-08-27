@@ -44,8 +44,16 @@ git log --oneline -10
 Then run the context collector. **Type a literal random token yourself** (e.g. `wrap-k3v9x2` — actual random characters you generate; never `$(...)` substitution, because the transcript must contain the literal token for self-identification):
 
 ```bash
-bash ${baseDir}/scripts/collect-context.sh wrap-XXXXXX
+bash "${CLAUDE_PLUGIN_ROOT}/skills/session-wrap/scripts/collect-context.sh" wrap-XXXXXX
 ```
+
+**If that expands to an empty or wrong path** (the command fails, or the path starts with `/skills/`), do NOT improvise a path from memory and do NOT skip this step — a skipped collector silently returns the pipeline to the 3-line-summary input this workflow exists to replace. Resolve it once and run the resolved path:
+
+```bash
+ls -d ~/.claude/plugins/cache/*/session-wrap/*/skills/session-wrap/scripts/collect-context.sh | tail -1
+```
+
+Report which of the two forms actually ran, so the placeholder's behavior stops being an open question.
 
 It prints `KEY=VALUE` lines:
 
