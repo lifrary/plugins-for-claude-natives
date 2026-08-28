@@ -29,12 +29,21 @@ OUT_DIR="${2:-${TMPDIR:-/tmp}}"
 
 command -v jq >/dev/null 2>&1 || { echo "ERROR: jq is required (brew install jq)" >&2; exit 1; }
 
-# Claude Code encodes the project cwd by replacing path separators and dots
-# with '-'. Example: /Users/foo/my.project -> -Users-foo-my-project
-SLUG=$(printf '%s' "$PWD" | tr '/.' '--')
-PROJ_DIR="$HOME/.claude/projects/$SLUG"
-if [ ! -d "$PROJ_DIR" ]; then
-  echo "ERROR: no session directory at $PROJ_DIR (cwd not a Claude Code project root?)" >&2
+# Claude Code encodes the project cwd by replacing every character outside
+# [A-Za-z0-9-] with '-'. Example: /Users/foo/my_project -> -Users-foo-my-project.
+# Two sanitizer generations exist on disk: an older one kept '_' and '.', so no
+# single expression addresses both — build BOTH candidates and let is-a-directory
+# decide. The previous `tr '/.' '--'` left '_' intact and therefore exited 1 in
+# every repo whose path holds one, which reads as "not a Claude Code project".
+PROJ_DIR=""
+for slug in "$(printf '%s' "$PWD" | sed 's/[^A-Za-z0-9-]/-/g')" \
+            "$(printf '%s' "$PWD" | tr '/.' '--')"; do
+  [ -d "$HOME/.claude/projects/$slug" ] || continue
+  PROJ_DIR="$HOME/.claude/projects/$slug"
+  break
+done
+if [ -z "$PROJ_DIR" ]; then
+  echo "ERROR: no session directory for $PWD under $HOME/.claude/projects (cwd not a Claude Code project root?)" >&2
   exit 1
 fi
 
