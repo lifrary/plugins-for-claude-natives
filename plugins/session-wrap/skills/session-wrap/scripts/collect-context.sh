@@ -4,12 +4,17 @@
 #
 # Usage: collect-context.sh <nonce> [out-dir]
 #
-#   <nonce>   A literal token the caller has ALREADY typed into the
+#   <nonce>   FALLBACK ONLY, used when CLAUDE_CODE_SESSION_ID is unavailable.
+#             A literal token the caller has ALREADY typed into the
 #             conversation. The invocation command line itself is recorded in
-#             the current session's transcript before execution, so the
-#             transcript containing this token IS the current session. The
+#             the current session's transcript before execution, so a token
+#             found in exactly one transcript identifies that session. The
 #             caller must type literal random characters — a $(...) expansion
 #             would put the unexpanded form in the transcript and never match.
+#             It is NOT a reliable identifier on its own: sibling sessions run
+#             by the same model from the same instruction pick the same
+#             "random" token, so a multi-transcript hit yields MATCHED=ambiguous
+#             rather than a confident pick.
 #   [out-dir] Where to write the extract (default: $TMPDIR, else /tmp).
 #
 # Prints KEY=VALUE lines on stdout:
@@ -17,8 +22,11 @@
 #   CONTEXT_BYTES     size of the extract
 #   TRANSCRIPT        transcript the extract came from
 #   TRANSCRIPT_AGE_S  seconds since that transcript was last written
-#   MATCHED           "nonce" (certain) or "newest-fallback" (may be a sibling
-#                     session — caller must warn downstream)
+#   MATCHED           "session-id" (certain) | "nonce" (certain, unique hit) |
+#                     "ambiguous" (nonce hit >1 transcript — sibling collision,
+#                     the extract may be another session) | "newest-fallback"
+#                     (no hit at all). Caller must warn downstream on the last
+#                     two and should not feed agents an unverified extract.
 #   REPO, HEAD, DIRTY revision pin for agents (repo abs path, short sha,
 #                     dirty-file count); REPO="(not a git repo)" outside git
 
@@ -47,19 +55,44 @@ if [ -z "$PROJ_DIR" ]; then
   exit 1
 fi
 
-# Find the transcript containing the nonce, newest first — the current session
-# appended the invocation moments ago, so the first file checked usually hits.
 MATCHED="newest-fallback"
 TRANSCRIPT=""
-while read -r f; do
-  [ -f "$f" ] || continue
-  n=$(grep -c -F "$NONCE" "$f" 2>/dev/null || true)
-  if [ "${n:-0}" -gt 0 ]; then
-    TRANSCRIPT="$f"
+
+# Preferred: the session id names its own transcript file, so nothing has to be
+# inferred. Claude Code exports it to every Bash subprocess.
+if [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
+   && [ -f "$PROJ_DIR/$CLAUDE_CODE_SESSION_ID.jsonl" ]; then
+  TRANSCRIPT="$PROJ_DIR/$CLAUDE_CODE_SESSION_ID.jsonl"
+  MATCHED="session-id"
+fi
+
+# Fallback: the nonce. Scan EVERY transcript and count the hits rather than
+# stopping at the first, because the nonce is not reliably unique.
+#
+# The caller typing "literal random characters" is the same model reading the
+# same instruction and the same example, so sessions converge on the same token:
+# `wrap-q7m4z8` was measured in 13 transcripts on 2026-08-28 and typed again by
+# an unrelated session on 08-29, so the scheme has no entropy across siblings
+# OR across days. The old loop broke at the first hit in newest-first order and
+# still reported MATCHED=nonce, handing callers another session's conversation
+# while telling them the match was certain. A collision must degrade to an
+# explicit "ambiguous", never to a confident wrong answer.
+if [ -z "$TRANSCRIPT" ]; then
+  HITS=""
+  for f in $(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null || true); do
+    [ -f "$f" ] || continue
+    n=$(grep -c -F "$NONCE" "$f" 2>/dev/null || true)
+    [ "${n:-0}" -gt 0 ] && HITS="$HITS$f"$'\n'
+  done
+  HIT_COUNT=$(printf '%s' "$HITS" | grep -c . || true)
+  if [ "${HIT_COUNT:-0}" -eq 1 ]; then
+    TRANSCRIPT=$(printf '%s' "$HITS" | head -1)
     MATCHED="nonce"
-    break
+  elif [ "${HIT_COUNT:-0}" -gt 1 ]; then
+    TRANSCRIPT=$(printf '%s' "$HITS" | head -1)   # newest of the colliding set
+    MATCHED="ambiguous"
   fi
-done < <(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null || true)
+fi
 
 if [ -z "$TRANSCRIPT" ]; then
   TRANSCRIPT=$(ls -t "$PROJ_DIR"/*.jsonl 2>/dev/null | head -1 || true)
