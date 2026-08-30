@@ -3,7 +3,7 @@ name: duplicate-checker
 description: |
   Phase 2 validation agent (conditional). Receives Phase 1 addition proposals (knowledge-curator placements, continuity-auditor automations) and validates them against existing docs, memory, and automation.
 tools: ["Read", "Glob", "Grep"]
-model: haiku
+model: opus
 color: yellow
 ---
 

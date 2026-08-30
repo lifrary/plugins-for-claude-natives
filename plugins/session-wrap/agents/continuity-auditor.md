@@ -3,7 +3,7 @@ name: continuity-auditor
 description: |
   Audit session continuity: verify incomplete work against git/file state, attach a verification command to every TODO, surface automation opportunities and refuted approaches. Use during session wrap-up.
 tools: ["Read", "Glob", "Grep", "Bash"]
-model: inherit
+model: opus
 color: cyan
 ---
 

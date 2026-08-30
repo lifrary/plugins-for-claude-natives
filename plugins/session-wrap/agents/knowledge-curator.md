@@ -3,7 +3,7 @@ name: knowledge-curator
 description: |
   Extract session learnings and route each to its correct documentation home (auto-memory, CLAUDE.md, project docs) with built-in duplicate checking. Use during session wrap-up.
 tools: ["Read", "Glob", "Grep"]
-model: inherit
+model: opus
 color: blue
 ---
 

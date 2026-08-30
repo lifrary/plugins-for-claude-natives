@@ -20,7 +20,7 @@ Database choice depends on current data patterns, so analyze codebase first.
 </commentary>
 </example>
 
-model: sonnet
+model: opus
 color: cyan
 tools:
   - Read

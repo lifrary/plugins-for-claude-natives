@@ -20,7 +20,7 @@ Research official documentation for authoritative feature comparison.
 </commentary>
 </example>
 
-model: sonnet
+model: opus
 color: blue
 tools:
   - WebSearch

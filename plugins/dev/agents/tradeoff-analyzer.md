@@ -20,7 +20,7 @@ Architecture comparison - analyze trade-offs considering project context from co
 </commentary>
 </example>
 
-model: sonnet
+model: opus
 color: yellow
 tools:
   - Read
