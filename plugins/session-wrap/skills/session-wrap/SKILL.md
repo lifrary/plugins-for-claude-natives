@@ -41,7 +41,7 @@ git status --short
 git log --oneline -10
 ```
 
-Then run the context collector. **Type a literal random token yourself** (e.g. `wrap-k3v9x2` — actual random characters you generate; never `$(...)` substitution, because the transcript must contain the literal token for self-identification):
+Then run the context collector. It identifies this session by `CLAUDE_CODE_SESSION_ID`, which names the transcript file directly. The token argument is the fallback for when that variable is missing, so it still has to be **a literal random token you type yourself** (e.g. `wrap-k3v9x2` — never `$(...)` substitution, which records the unexpanded form in the transcript and can never match):
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/skills/session-wrap/scripts/collect-context.sh" wrap-XXXXXX
@@ -58,7 +58,13 @@ Report which of the two forms actually ran, so the placeholder's behavior stops 
 It prints `KEY=VALUE` lines:
 
 - `CONTEXT_FILE` — compact extract of the current conversation (user + assistant text only, thinking/tool noise stripped)
-- `MATCHED` — `nonce` (certain: this session) or `newest-fallback` (uncertain: could be a concurrent sibling session; if so, warn in the final report)
+- `MATCHED` — which instrument found the transcript. The script emits four values and the last two are not safe to proceed on silently:
+  - `session-id` — certain, the session id named the file.
+  - `nonce` — certain, the token hit exactly one transcript.
+  - `ambiguous` — the token hit several transcripts, so **the extract may be another session's conversation**. Sibling sessions reading this same instruction converge on the same "random" token (`wrap-q7m4z8` was measured in 13 transcripts on 2026-08-28), so this is a normal outcome, not a rare one.
+  - `newest-fallback` — nothing matched and the newest transcript was taken on faith.
+
+  On `ambiguous` or `newest-fallback`, say so in the final report and do not present agent findings as facts about this session; the agents were handed an unverified conversation.
 - `REPO`, `HEAD`, `DIRTY` — the revision pin agents must verify claims against
 
 Compose a Session Summary yourself (work done, files touched, key decisions). Agents receive BOTH your summary and the context file — your summary orients, the context file is the evidence source.
